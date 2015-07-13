@@ -11,5 +11,5 @@ todo: learn how to use CRFSuite to train on atx address data
 [USAddress]: https://github.com/datamade/usaddress
 [datamade]: http://datamade.us/
 [GDAL]: http://www.gdal.org/
-[atx]: ftp://ftp.ci.austin.tx.us/GIS-Data/Regional/address_points/address_point.zip
-[CRFSute]: http://www.chokkan.org/software/crfsuite/
+[atx]: http://goo.gl/z5Kve9
+[CRFSuite]: http://www.chokkan.org/software/crfsuite/
