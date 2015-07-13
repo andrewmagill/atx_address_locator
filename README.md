@@ -11,5 +11,5 @@ todo: learn how to use CRFSuite to train on atx address data
 [USAddress]: https://github.com/datamade/usaddress
 [datamade]: http://datamade.us/
 [GDAL]: http://www.gdal.org/
-[atx]: http://goo.gl/z5Kve9
+[atx]: http://goo.gl/M2JIme
 [CRFSuite]: http://www.chokkan.org/software/crfsuite/
