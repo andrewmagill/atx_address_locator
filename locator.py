@@ -205,9 +205,13 @@ def _jsonify(address_candidates):
         candidate = {}
         candidate['address'] = feature.GetField("full_stree")
 
+        geom = feature.GetGeometryRef()
+        x = geom.Centroid().GetPoint()[0]
+        y = geom.Centroid().GetPoint()[0]
+
         location = {}
-        location['x'] = 3030303
-        location['y'] = 3030303
+        location['x'] = x
+        location['y'] = y
 
         candidate['location'] = location
         candidate['score'] = 100
@@ -228,7 +232,7 @@ def _jsonify(address_candidates):
     fortheweb = {'spatialReference' : spatialReference,
                  'candidates' : candidates}
 
-    return fortheweb
+    return repr(fortheweb).replace("\'","\"")
 
 def locate(address_string, epsg=EPSG_2277):
     """returns json address candidates given address string
