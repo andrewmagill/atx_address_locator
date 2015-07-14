@@ -132,12 +132,8 @@ def _construct_query(address_parts):
 
     field_list = [field for field in dir(ATXFields) if not field.startswith('_')]
 
-    print field_list
-
     query = ("SELECT OGR_GEOM_WKT, %s FROM address_point WHERE " %
              ', '.join(field_list))
-
-    print query
 
     if len(clause_list) <= 0:
         raise Exception(Messages.bad_results)
@@ -169,23 +165,15 @@ def _query_db(query):
     if not layer:
         raise Exception(Messages.bad_query)
 
-    _print_results(layer)
+    results = _jsonify(layer)
 
-    return layer
+    return results
 
 def _score_results(address_parts, results):
     return results
 
 def _print_results(layer):
     feature = layer.GetNextFeature()
-
-    spatial_reference = layer.GetSpatialRef()
-    print spatial_reference
-    spatial_reference.AutoIdentifyEPSG()
-    print spatial_reference
-    print dir(spatial_reference)
-    print(spatial_reference.GetAuthorityCode(None))
-    print spatial_reference.GetAuthorityName('PROJCS')
 
     while feature:
         print feature.ExportToJson()
@@ -207,7 +195,40 @@ def _jsonify(address_candidates):
     """
     #if not type(address_candidates) is list:
     #    raise TypeError("list required")
-    pass
+
+    spatialReference = {"wkid": 102739,"latestWkid": 2277}
+    candidates = []
+
+    feature = address_candidates.GetNextFeature()
+
+    while feature:
+        candidate = {}
+        candidate['address'] = feature.GetField("full_stree")
+
+        location = {}
+        location['x'] = 3030303
+        location['y'] = 3030303
+
+        candidate['location'] = location
+        candidate['score'] = 100
+
+        attributes = {}
+
+        candidate['attributes'] = attributes
+
+        candidates.append(candidate)
+
+        #for field_index in range(feature.GetFieldCount()):
+        #    print feature.GetFieldDefnRef(field_index).GetName(),
+        #    print feature.GetFieldAsString(field_index)
+        #print
+
+        feature = address_candidates.GetNextFeature()
+
+    fortheweb = {'spatialReference' : spatialReference,
+                 'candidates' : candidates}
+
+    return fortheweb
 
 def locate(address_string, epsg=EPSG_2277):
     """returns json address candidates given address string
@@ -219,12 +240,14 @@ def locate(address_string, epsg=EPSG_2277):
     query = _construct_query(address_parts)
     results = _query_db(query)
 
-    if not epsg == EPSG_2277:
-        results = reproject(results, epsg)
+    #if not epsg == EPSG_2277:
+    #    results = reproject(results, epsg)
 
-    ranked_results = _score_results(address_parts, results)
+    #ranked_results = _score_results(address_parts, results)
 
-    return _jsonify(ranked_results)
+    #_print_results(ranked_results)
+    #return _jsonify(ranked_results)
+    return results
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
