@@ -264,8 +264,10 @@ def _jsonify(address_candidates):
 
         candidates.append(fields)
 
+    ordered_candidates = sorted(candidates, key=lambda t: t['score'], reverse=True)
+
     fortheweb = {'spatialReference' : spatialReference,
-                 'candidates' : candidates}
+                 'candidates' : ordered_candidates}
 
     return repr(fortheweb).replace("\'","\"")
 
