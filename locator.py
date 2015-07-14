@@ -1,5 +1,5 @@
-import sys, re, usaddress, logging
-from osgeo import ogr
+import os, sys, re, usaddress, logging
+from osgeo import ogr, osr
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,6 +21,10 @@ class ATXFields(object):
     street_nam  = 'street_nam'
     suffix_dir  = 'suffix_dir'
     street_typ  = 'street_typ'
+    segment_id  = 'segment_id'
+    parent_pla  = 'parent_pla'
+    place_id    = 'place_id'
+    full_stree  = 'full_stree'
 
 class Messages(object):
     str_req = "String required"
@@ -28,6 +32,7 @@ class Messages(object):
     dict_req = "Dictionary required"
     bad_results = "Parser results are not valid"
     bad_string = "Invalid search string"
+    bad_query = "Query did not return any results"
 
 STREET_ADDRESS = "Street Address"
 
@@ -40,6 +45,12 @@ field_map = {
     USFields.StreetNamePostDirectional : ATXFields.suffix_dir,
     USFields.StreetNamePostType        : ATXFields.street_typ,
 }
+
+ADDRESS_FILE_PATH = r"shapefiles/address_point/address_point.shp"
+
+OGR_SHP_DRIVER = 'ESRI Shapefile'
+
+EPSG_2277 = 2277
 
 def _sanitize(user_input):
     """strip unwated characters from user input
@@ -117,9 +128,16 @@ def _construct_query(address_parts):
     clause_list = []
 
     for key, value in address_parts.items():
-        clause_list.append("{} = {}".format(key, value))
+        clause_list.append("{} = '{}'".format(key, value))
 
-    query = "select OGR_GEOM_WKT, * from address_point where "
+    field_list = [field for field in dir(ATXFields) if not field.startswith('_')]
+
+    print field_list
+
+    query = ("SELECT OGR_GEOM_WKT, %s FROM address_point WHERE " %
+             ', '.join(field_list))
+
+    print query
 
     if len(clause_list) <= 0:
         raise Exception(Messages.bad_results)
@@ -129,16 +147,60 @@ def _construct_query(address_parts):
     for clause in clause_list[1:]:
         query += " and " + clause
 
-    query += ";"
+    # doesn't work with semicolon
+    # so don't do this: query += ";"
 
     return query
 
 def _query_db(query):
     """executes sql query against data in shapefile
     """
-    #if not type(query) is str:
-    #    raise TypeError("string required")
-    pass
+    if not type(query) is str:
+        raise TypeError("string required")
+
+    if not os.path.exists(ADDRESS_FILE_PATH):
+        raise Exception("Invalid path, shapefile does not exist")
+
+    driver = ogr.GetDriverByName(OGR_SHP_DRIVER)
+    data_source = driver.Open(ADDRESS_FILE_PATH, 0)
+
+    layer = data_source.ExecuteSQL(query)
+
+    if not layer:
+        raise Exception(Messages.bad_query)
+
+    _print_results(layer)
+
+    return layer
+
+def _score_results(address_parts, results):
+    return results
+
+def _print_results(layer):
+    feature = layer.GetNextFeature()
+
+    spatial_reference = layer.GetSpatialRef()
+    print spatial_reference
+    spatial_reference.AutoIdentifyEPSG()
+    print spatial_reference
+    print dir(spatial_reference)
+    print(spatial_reference.GetAuthorityCode(None))
+    print spatial_reference.GetAuthorityName('PROJCS')
+
+    while feature:
+        print feature.ExportToJson()
+
+        #for field_index in range(feature.GetFieldCount()):
+        #    print feature.GetFieldDefnRef(field_index).GetName(),
+        #    print feature.GetFieldAsString(field_index)
+        #print
+
+        feature = layer.GetNextFeature()
+
+def _reproject(features, epsg):
+    # this may help
+    # https://pcjericks.github.io/py-gdalogr-cookbook/projection.html
+    return features
 
 def _jsonify(address_candidates):
     """returns json string from list of address candidates
@@ -147,28 +209,28 @@ def _jsonify(address_candidates):
     #    raise TypeError("list required")
     pass
 
-def locate(address_string):
+def locate(address_string, epsg=EPSG_2277):
     """returns json address candidates given address string
     """
     if not type(address_string) is str:
         raise TypeError(Messages.str_req)
 
     address_parts = _parse(address_string)
-
-    print(address_parts)
-
     query = _construct_query(address_parts)
-
-    print(query)
-
     results = _query_db(query)
-    return _jsonify(results)
+
+    if not epsg == EPSG_2277:
+        results = reproject(results, epsg)
+
+    ranked_results = _score_results(address_parts, results)
+
+    return _jsonify(ranked_results)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         print(locate(sys.argv[1]))
     else:
-        print(locate("2201 Barton Springs Rd"))
+        print(locate("1508 Alguno Rd"))
 
 #lst = []
 #lambdahash = {}
