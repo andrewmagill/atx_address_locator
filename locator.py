@@ -1,4 +1,4 @@
-import os, sys, re, usaddress, logging
+import os, sys, re, usaddress, logging, mappings
 from osgeo import ogr, osr
 
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +52,8 @@ OGR_SHP_DRIVER = 'ESRI Shapefile'
 
 EPSG_2277 = 2277
 
+ADDRESS_OVER_UNDER = 20
+
 def _sanitize(user_input):
     """strip unwated characters from user input
     """
@@ -68,6 +70,16 @@ def _pre_hack(address_string):
     """
     if not type(address_string) is str:
         raise TypeError(Messages.str_req)
+
+    address_string = address_string.upper()
+    words = address_string.split(' ')
+    for word in words:
+        if word in mappings.STREET_PRE_TYPE_TRANS.keys():
+            address_string = address_string.replace(word, mappings.STREET_PRE_TYPE_TRANS[word])
+        if word in mappings.STREET_POST_TYPE_TRANS.keys():
+            address_string = address_string.replace(word, mappings.STREET_POST_TYPE_TRANS[word])
+        if word in mappings.POST_DIR_TRANS.keys():
+            address_string = address_string.replace(word, mappings.POST_DIR_TRANS[word])
 
     return address_string
 
@@ -114,8 +126,8 @@ def _parse(address_string):
     address_string = _sanitize(address_string)
     address_string = _pre_hack(address_string)
     address_parts = usaddress.tag(address_string)
-    address_parts = _translate_to_atx(address_parts)
     address_parts = _post_hack(address_parts)
+    address_parts = _translate_to_atx(address_parts)
     return address_parts
 
 def _construct_query(address_parts):
@@ -128,7 +140,17 @@ def _construct_query(address_parts):
     clause_list = []
 
     for key, value in address_parts.items():
-        clause_list.append("{} = '{}'".format(key, value))
+        if key == ATXFields.address:
+            value = int(value)
+            low = value - ADDRESS_OVER_UNDER
+            high = value + ADDRESS_OVER_UNDER
+            clause_list.append("{0} > {1} AND {0} < {2}"
+                                .format(key, low, high))
+        elif key == ATXFields.street_nam:
+            clause_list.append("{} LIKE '%{}%'".format(key, value))
+        else:
+            #clause_list.append("{} = '{}'".format(key, value))
+            pass
 
     field_list = [field for field in dir(ATXFields) if not field.startswith('_')]
 
@@ -165,25 +187,45 @@ def _query_db(query):
     if not layer:
         raise Exception(Messages.bad_query)
 
-    results = _jsonify(layer)
-
-    return results
-
-def _score_results(address_parts, results):
-    return results
-
-def _print_results(layer):
+    address_candidates = []
     feature = layer.GetNextFeature()
-
     while feature:
-        print feature.ExportToJson()
-
-        #for field_index in range(feature.GetFieldCount()):
-        #    print feature.GetFieldDefnRef(field_index).GetName(),
-        #    print feature.GetFieldAsString(field_index)
-        #print
-
+        fields = {}
+        for field_index in range(feature.GetFieldCount()):
+            key = feature.GetFieldDefnRef(field_index).GetName()
+            value = feature.GetFieldAsString(field_index)
+            fields[key] = value
+        address_candidates.append(fields)
         feature = layer.GetNextFeature()
+    return address_candidates
+
+def _score_candidates(candidates, address_parts):
+    threshold_candidates = []
+    for candidate in candidates:
+        score = 0
+        for key, value in address_parts.items():
+            if key == ATXFields.address:
+                candidate_value = int(candidate[key])
+                preferred_value = int(address_parts[key])
+
+                if candidate_value > preferred_value:
+                    difference = candidate_value - preferred_value
+                else:
+                    difference = preferred_value - candidate_value
+
+                score += ((ADDRESS_OVER_UNDER - difference) * (10/float(ADDRESS_OVER_UNDER)))
+
+            elif address_parts[key] in candidate[ATXFields.full_stree]:
+                score += 10
+
+        max_score = len(address_parts)*10
+        normalized_score = int(((float(score)/float(max_score)) * 100))
+        candidate['score'] = normalized_score
+
+        if normalized_score > 75:
+            threshold_candidates.append(candidate)
+
+    return threshold_candidates
 
 def _reproject(features, epsg):
     # this may help
@@ -199,35 +241,28 @@ def _jsonify(address_candidates):
     spatialReference = {"wkid": 102739,"latestWkid": 2277}
     candidates = []
 
-    feature = address_candidates.GetNextFeature()
+    for candidate in address_candidates:
 
-    while feature:
-        candidate = {}
-        candidate['address'] = feature.GetField("full_stree")
+        fields = {}
+        fields['address'] = candidate['full_stree']
 
-        geom = feature.GetGeometryRef()
-        x = geom.Centroid().GetPoint()[0]
-        y = geom.Centroid().GetPoint()[0]
+        wkt = candidate['OGR_GEOM_WKT']
+        point = ogr.CreateGeometryFromWkt(wkt)
+        x = point.GetX()
+        y = point.GetY()
 
         location = {}
         location['x'] = x
         location['y'] = y
 
-        candidate['location'] = location
-        candidate['score'] = 100
+        fields['location'] = location
+        fields['score'] = candidate['score']
 
         attributes = {}
 
-        candidate['attributes'] = attributes
+        fields['attributes'] = attributes
 
-        candidates.append(candidate)
-
-        #for field_index in range(feature.GetFieldCount()):
-        #    print feature.GetFieldDefnRef(field_index).GetName(),
-        #    print feature.GetFieldAsString(field_index)
-        #print
-
-        feature = address_candidates.GetNextFeature()
+        candidates.append(fields)
 
     fortheweb = {'spatialReference' : spatialReference,
                  'candidates' : candidates}
@@ -242,27 +277,17 @@ def locate(address_string, epsg=EPSG_2277):
 
     address_parts = _parse(address_string)
     query = _construct_query(address_parts)
-    results = _query_db(query)
+    address_candidates = _query_db(query)
+    scored_candidates = _score_candidates(address_candidates, address_parts)
+    json_result = _jsonify(scored_candidates)
 
     #if not epsg == EPSG_2277:
     #    results = reproject(results, epsg)
 
-    #ranked_results = _score_results(address_parts, results)
-
-    #_print_results(ranked_results)
-    #return _jsonify(ranked_results)
-    return results
+    return json_result
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         print(locate(sys.argv[1]))
     else:
         print(locate("1508 Alguno Rd"))
-
-#lst = []
-#lambdahash = {}
-#lambdahash['mult'] = lambda x, y: y.append(x)
-#lambdahash['mult'](1, lst)
-#lambdahash['mult'](2, lst)
-#lambdahash['mult'](3, lst)
-#print lst
